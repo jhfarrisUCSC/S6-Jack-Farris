@@ -1,20 +1,24 @@
 /**
- * Counter game rules, kept free of the DOM so they are easy to read and test.
+ * Orbital Research rules, kept free of the DOM so they are easy to read.
  *
- * The counter is the game's currency: tapping the main button adds to it and
- * upgrades are bought by spending it.
+ * Research data is the currency: launching a probe collects it and upgrades
+ * are bought by spending it. Equipment improves launches; studied celestial
+ * bodies produce data on their own.
  */
 
 export type UpgradeEffect =
-  | "clickAdd"
-  | "clickMul"
-  | "passiveAdd"
-  | "passiveMul";
+  | "launchAdd"
+  | "launchMul"
+  | "researchAdd"
+  | "researchMul";
+
+export type UpgradeCategory = "equipment" | "celestial";
 
 export interface UpgradeDef {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly category: UpgradeCategory;
   /** Cost of the first level. */
   readonly baseCost: number;
   /** Each level costs this much more than the last. */
@@ -26,9 +30,9 @@ export interface UpgradeDef {
 }
 
 export interface GameState {
-  /** Whole units of currency, the only value the player spends. */
+  /** Whole units of research data, the only value the player spends. */
   count: number;
-  /** Fractional passive income not yet worth a whole unit. */
+  /** Fractional passive data not yet worth a whole unit. */
   pending: number;
   /** Purchased level per upgrade id. Missing means level 0. */
   levels: Record<string, number>;
@@ -36,51 +40,76 @@ export interface GameState {
 
 export const UPGRADES: readonly UpgradeDef[] = [
   {
-    id: "finger",
-    name: "Extra Finger",
-    description: "+1 per tap",
+    id: "booster",
+    name: "Signal Booster",
+    description: "+1 data per launch",
+    category: "equipment",
     baseCost: 10,
     growth: 1.45,
-    effect: "clickAdd",
+    effect: "launchAdd",
     amount: 1,
   },
   {
-    id: "coffee",
-    name: "Coffee Mug",
-    description: "+1 per second",
-    baseCost: 20,
-    growth: 1.5,
-    effect: "passiveAdd",
-    amount: 1,
-  },
-  {
-    id: "glove",
-    name: "Golden Glove",
-    description: "Doubles tap power",
+    id: "thruster",
+    name: "Ion Thruster",
+    description: "Doubles launch yield",
+    category: "equipment",
     baseCost: 150,
     growth: 5,
-    effect: "clickMul",
+    effect: "launchMul",
     amount: 2,
     maxLevel: 4,
   },
   {
-    id: "server",
-    name: "Server Rack",
-    description: "+10 per second",
+    id: "telescope",
+    name: "Orbital Telescope",
+    description: "+5 data per second",
+    category: "equipment",
+    baseCost: 250,
+    growth: 1.55,
+    effect: "researchAdd",
+    amount: 5,
+  },
+  {
+    id: "luna",
+    name: "Luna",
+    description: "+1 data per second",
+    category: "celestial",
+    baseCost: 20,
+    growth: 1.5,
+    effect: "researchAdd",
+    amount: 1,
+  },
+  {
+    id: "mars",
+    name: "Mars",
+    description: "+10 data per second",
+    category: "celestial",
     baseCost: 400,
     growth: 1.6,
-    effect: "passiveAdd",
+    effect: "researchAdd",
     amount: 10,
   },
   {
-    id: "overclock",
-    name: "Overclock",
-    description: "Doubles passive income",
+    id: "sol",
+    name: "Sol",
+    description: "Doubles passive research",
+    category: "celestial",
     baseCost: 600,
     growth: 5,
-    effect: "passiveMul",
+    effect: "researchMul",
     amount: 2,
     maxLevel: 4,
+  },
+  {
+    id: "jupiter",
+    name: "Jupiter",
+    description: "+100 data per second",
+    category: "celestial",
+    baseCost: 5000,
+    growth: 1.7,
+    effect: "researchAdd",
+    amount: 100,
   },
 ];
 
@@ -101,29 +130,31 @@ export function costOf(def: UpgradeDef, level: number): number {
   return Math.floor(def.baseCost * def.growth ** level);
 }
 
-export function clickPower(state: GameState): number {
+export function launchPower(state: GameState): number {
   let power = 1;
+  let multiplier = 1;
   for (const def of UPGRADES) {
     const level = levelOf(state, def.id);
     if (level === 0) continue;
-    if (def.effect === "clickAdd") power += def.amount * level;
-    if (def.effect === "clickMul") power *= def.amount ** level;
+    if (def.effect === "launchAdd") power += def.amount * level;
+    if (def.effect === "launchMul") multiplier *= def.amount ** level;
   }
-  return power;
+  return power * multiplier;
 }
 
-export function passivePerSecond(state: GameState): number {
+export function researchPerSecond(state: GameState): number {
   let rate = 0;
+  let multiplier = 1;
   for (const def of UPGRADES) {
     const level = levelOf(state, def.id);
     if (level === 0) continue;
-    if (def.effect === "passiveAdd") rate += def.amount * level;
-    if (def.effect === "passiveMul") rate *= def.amount ** level;
+    if (def.effect === "researchAdd") rate += def.amount * level;
+    if (def.effect === "researchMul") multiplier *= def.amount ** level;
   }
-  return rate;
+  return rate * multiplier;
 }
 
-/** Spends currency on one level of an upgrade. Returns false if it can't. */
+/** Spends data on one level of an upgrade. Returns false if it can't. */
 export function buy(state: GameState, def: UpgradeDef): boolean {
   const level = levelOf(state, def.id);
   if (isMaxed(def, level)) return false;
@@ -136,16 +167,16 @@ export function buy(state: GameState, def: UpgradeDef): boolean {
   return true;
 }
 
-/** Taps the main button. Returns the amount gained. */
-export function tap(state: GameState): number {
-  const gain = clickPower(state);
+/** Launches a probe. Returns the amount of data gained. */
+export function launch(state: GameState): number {
+  const gain = launchPower(state);
   state.count += gain;
   return gain;
 }
 
-/** Adds passive income for a slice of time, in whole units only. */
+/** Adds passive research for a slice of time, in whole units only. */
 export function tick(state: GameState, seconds: number): void {
-  state.pending += passivePerSecond(state) * seconds;
+  state.pending += researchPerSecond(state) * seconds;
   const whole = Math.floor(state.pending);
   if (whole > 0) {
     state.count += whole;
